@@ -1,0 +1,125 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>File Encryptor / Decryptor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display:flex; justify-content:center; padding:40px; background:#f4f6f8; }
+    .card { width:480px; background:#fff; border-radius:10px; padding:20px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+    h1 { font-size:20px; margin:0 0 12px; }
+    .drop { border:2px dashed #c8ccd1; padding:24px; border-radius:8px; text-align:center; cursor:pointer; background:#fbfdff; }
+    .drop.drag { border-color:#1976d2; background:#e8f1ff; }
+    input[type="password"] { width:100%; padding:10px; margin-top:12px; border-radius:6px; border:1px solid #d0d4da; box-sizing:border-box; }
+    .row { display:flex; gap:8px; margin-top:12px; }
+    button { flex:1; padding:10px; border-radius:6px; border:none; cursor:pointer; font-weight:600; }
+    button.encrypt { background:#1976d2; color:white; }
+    button.decrypt { background:#4CAF50; color:white; }
+    small { color:#666; display:block; margin-top:10px; }
+    progress { width:100%; margin-top:10px; display:block; }
+    .hidden-file { display:none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Encrypt / Decrypt File (AES-CBC, PKCS#7)</h1>
+
+    <div id="drop" class="drop">
+      <div id="ftext">Click or drag a file here</div>
+      <input id="file" class="hidden-file" type="file">
+    </div>
+
+    <input id="password" type="password" placeholder="Enter password / key">
+    <div class="row">
+      <button id="enc" class="encrypt">Encrypt</button>
+      <button id="dec" class="decrypt">Decrypt</button>
+    </div>
+
+    <progress id="progress" value="0" max="100" style="display:none"></progress>
+    <small id="status">Idle</small>
+  </div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const ftext = document.getElementById('ftext');
+const password = document.getElementById('password');
+const encBtn = document.getElementById('enc');
+const decBtn = document.getElementById('dec');
+const status = document.getElementById('status');
+const progress = document.getElementById('progress');
+
+let selectedFile = null;
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', e => { drop.classList.remove('drag'); });
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if(f) handleFile(f);
+});
+
+function handleFile(f){
+  selectedFile = f;
+  ftext.textContent = `Selected: ${f.name} (${f.size} bytes)`;
+  status.textContent = 'File ready';
+}
+
+function setStatus(s){ status.textContent = s; }
+function setProgress(p){ progress.style.display = p>0 && p<100 ? 'block' : (p===100 ? 'block' : 'none'); progress.value = p; }
+
+async function sendFile(endpoint){
+  if(!selectedFile){ alert('Select a file first'); return; }
+  if(!password.value){ alert('Enter a password/key'); return; }
+
+  setStatus('Uploading...');
+  setProgress(10);
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+  form.append('password', password.value);
+
+  try {
+    const resp = await fetch(endpoint, { method:'POST', body: form });
+    if(!resp.ok){
+      const j = await resp.json().catch(()=>null);
+      throw new Error(j && j.error ? j.error : 'Server error');
+    }
+    // got blob -> download
+    const blob = await resp.blob();
+    let filename = 'download';
+    const cd = resp.headers.get('Content-Disposition');
+    if(cd){
+      const m = cd.match(/filename="?([^";]+)"?/);
+      if(m) filename = m[1];
+    } else {
+      // fallback naming
+      filename = endpoint.endsWith('/encrypt') ? selectedFile.name + '.enc' : 'decrypted_' + selectedFile.name;
+    }
+    setProgress(80);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setProgress(100);
+    setStatus('Done — file downloaded');
+  } catch (err){
+    setProgress(0);
+    setStatus('Error: ' + err.message);
+  } finally {
+    setTimeout(()=> setProgress(0), 800);
+  }
+}
+
+encBtn.addEventListener('click', () => sendFile('/encrypt'));
+decBtn.addEventListener('click', () => sendFile('/decrypt'));
+</script>
+</body>
+</html>
